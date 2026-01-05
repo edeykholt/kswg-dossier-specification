@@ -1,7 +1,8 @@
+```markdown
 Verifiable Dossiers
 ================================================
 
-**Specification Status**: v0.3 Draft
+**Specification Status**: v0.4 Draft
 
 **Latest Draft:**
 
@@ -134,6 +135,9 @@ In addition the following terms are defined normatively, here:
 
 * Evidentum: A single external artifact that is referenced by an edge. A countable group of these artifacts is pluralized as "evidenta", but is usually referred to with the uncounted, collective form, "evidence".
 * Proximate Metdata: Metadata about the dossier as a whole that the issuer of the dossier wishes to directly attest as part of the issuance process.
+* Annotation Edge: An edge in a dossier version that points to a specific edge or artifact in a previous version of the same dossier, typically used to modify its status or apply a procedural ruling (e.g., objection, admission) without altering the immutable history.
+* Temporal Pinning: The process of observing dynamic state (such as a bank balance or API result) at a specific moment in time and wrapping it in a verifiable, static attestation that can be referenced by the dossier.
+* Predicate Edge: An edge that references a Zero-Knowledge Proof (ZKP) or a derived cryptographic claim rather than the raw evidence itself, used to prove eligibility or factual status without revealing underlying sensitive data.
 
 [//]: # (Dossier Data Model {#sec:content})
 
@@ -164,7 +168,7 @@ A compliant schema for a dossier:
 
     ```json
     {
-        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$schema": "[https://json-schema.org/draft/2020-12/schema](https://json-schema.org/draft/2020-12/schema)",
         "$id": "EOvMDBLnGaNHqfZgEnqnQO8lpzPQ5bRxC_RdoiniiuGz",
         "title": "Mortgage Creditworthiness Dossier",
         "description": "Evidence of a borrower's qualification for a mortgage.",
@@ -239,9 +243,9 @@ To support the ACDC Wrapper pattern, this specification defines the requirements
 
 A reference (e.g., a URL) to the verification policy or governance framework that the bridging party followed when validating the foreign evidence.
 
-## The Dossier Lifecycle
+## The Operational Lifecycle: Creation, Evolution, and Verification
 
-The dossier is a persistent data artifact with a distinct lifecycle encompassing three phases: curation, citation, and verification.
+The dossier is a persistent, evolving data artifact with a distinct lifecycle encompassing curation, iterative assembly, state management, citation, and verification.
 
 ### Curation: Assembling and Signing the Dossier
 
@@ -253,9 +257,28 @@ The normative steps for dossier curation are as follows:
 
 2. **Assembly**: The issuer constructs the dossier ACDC data structure. This involves creating an edges block and populating it with named links that point to each acquired evidence artifact, as described in Section 3.
 
-3. **Signing and Anchoring**: The issuer uses the private key(s) associated with its KERI AID to sign the fully assembled dossier ACDC. This act of signing creates a non-repudiable attestation to the dossier's content. The issuance event, including the signature, is then anchored in the issuer's Key Event Log (KEL), providing a permanent, verifiable record.
+3. **Iterative Assembly and Versioning**: Dossiers are rarely static. As new evidence is collected or the status of investigation changes, the dossier evolves. To support this, issuers MAY issue new versions of a dossier. A new version MUST be a valid ACDC that links to the previous version via a `prev` edge (or a schema-specific equivalent). This creates a verifiable chain of the dossier's history, allowing verifiers to traverse back through the lineage of the evidence collection.
 
-4. **Publication**: The issuer publishes the signed dossier ACDC at a stable, publicly resolvable location, typically one or more HTTP URLs. This allows authorized verifiers to fetch the dossier when it is cited.1
+4. **Signing and Anchoring**: The issuer uses the private key(s) associated with its KERI AID to sign the fully assembled dossier ACDC. This act of signing creates a non-repudiable attestation to the dossier's content. The issuance event, including the signature, is then anchored in the issuer's Key Event Log (KEL), providing a permanent, verifiable record.
+
+5. **Publication**: The issuer publishes the signed dossier ACDC at a stable, publicly resolvable location, typically one or more HTTP URLs. This allows authorized verifiers to fetch the dossier when it is cited.1
+
+### State Management and Metadata Overlays
+
+For dossiers used in procedural contexts (e.g., legal proceedings, insurance adjustments), the mere existence of evidence is insufficient; its status relative to the procedure matters. An artifact may be "marked for identification," "admitted," "objected to," or "stricken." Because ACDCs are immutable, an issuer cannot simply modify the metadata of an existing edge.
+
+To manage these state transitions, dossiers MUST employ **Annotation Edges**. An annotation edge is an edge in a new version of the dossier that points to an artifact (or an edge) in a previous version. The payload of the annotation edge carries the new state or ruling. For example, a "Court Case Dossier v2" might contain an edge labeled `ruling_101` that points to the SAID of `exhibit_A` (from v1) with the attribute `status: "admitted"`. Verifiers MUST process the dossier by traversing the graph to resolve the "effective state" of each piece of evidence, applying the latest annotations found in the chain.
+
+### Temporal Pinning
+
+Many dossiers require evidence of dynamic states, such as a bank balance, a credit score, or a current employment status. Direct links to live APIs are unverifiable in a static context. To include dynamic data, issuers MUST use **Temporal Pinning**.
+
+This process requires the assembler (or a trusted "oracle" service) to:
+1. Observe the dynamic state at a specific instant (`Time T`).
+2. Wrap that observation in a signed ACDC (an "Observation Attestation").
+3. Anchor that ACDC in a KEL.
+
+The dossier then links to this static, timestamped Observation Attestation. This effectively "freezes" the data stream at a specific block height, allowing the dossier to assert, "The borrower had $50,000 in this account at the exact moment this dossier was assembled," rather than "The borrower has $50,000 now."
 
 ### Citation: Referencing the Dossier in Protocols
 
@@ -342,61 +365,58 @@ For the Dossier SAID: To break the link between a transaction and a persistent d
 ### Contractually Protected Disclosure
 Technical privacy mechanisms can be augmented with legal and contractual controls. A server hosting a dossier MAY be configured to enforce access control policies. For example, it could serve a compacted, privacy-preserving version of a dossier to any anonymous request but require a cryptographically signed request to access a more expanded version. The act of signing the request can be tied to the verifier's agreement to a set of terms and conditions regarding data privacy, use, and re-sharing. This approach creates a verifiable audit trail of who accessed sensitive information and contractually binds them to specific data handling policies, combining technical enforcement with legal accountability.1
 
-## Use Cases and Implementation Guidance
+## Use Cases and Architectural Patterns
 
-### Verifiable Voice Protocol (VVP)
+The following use cases illustrate distinct architectural patterns for deploying dossiers. Each profile highlights a different combination of grouping strategies, state management, and trust delegation, demonstrating the dossier's flexibility across diverse domains.
 
-The Verifiable Voice Protocol provides the most complete, end-to-end implementation example for dossiers. In VVP, the dossier serves as the container for all the stable, long-lived evidence that proves an Accountable Party's (AP) identity and right to make a call.
+### Verifiable Voice Protocol (VVP): The Compositional Dossier
 
-#### Dossier Structure for an Accountable Party (AP)
+The Verifiable Voice Protocol (VVP) represents the **Compositional Dossier** pattern. Here, the primary goal is not to tell a story or trace a history, but to assemble a valid "permission slip" from independent authorities.
 
-A typical dossier for a VVP AP would be issued by the AP's AID and contain a set of named edges pointing to the essential credentials for establishing trust in a voice call. An example structure would include 1:
+* **Goal:** Prove the right to engage in a high-trust activity (making a call).
+* **Key Concept: Distributed Root of Trust.** In this pattern, the dossier assembler (the Accountable Party) does not generate the evidence. Instead, they act as a curator, bundling credentials issued by distinct, domain-specific roots of trust:
+    * **Legal Identity:** Vetted by a Legal Entity Identifier (LEI) issuer.
+    * **Resource Authority:** Telephone number usage vetted by a telecom carrier or regulator.
+    * **Brand Rights:** Vetted by a trademark steward.
+* **Verification Logic:** The verifier validates the dossier by recursively checking the issuers of the edge credentials. Trust is derived from the leaf nodes (the authorities), not merely from the dossier issuer. This pattern is ideal for access control, licensing, and regulatory compliance.
 
-* vetting: An edge to an ACDC (e.g., a verifiable LEI) that proves the legal identity of the AP.
-* alloc: An edge to a TNAlloc credential ACDC that proves the AP's right to use the originating phone number.
-* brand: An edge to a Brand credential ACDC that proves the AP's right to use asserted brand assets like a name or logo.
-* delsig: An edge to a DelegatedSigner credential, used when the AP delegates the real-time signing of call passports to another entity, such as a call center.
+### Law Enforcement and Adjudication: The Procedural Dossier
 
-#### Example Evidence Graph for Call Center Delegation
+This profile illustrates the **Procedural Dossier** pattern, which manages the complex lifecycle of evidence from field collection through courtroom adjudication. It extends the "Crime Scene" concept to handle the adversarial nature of legal proceedings.
 
-In a common business scenario, an enterprise (the AP) hires a call center to make calls on its behalf. The call center's equipment becomes the Originating Party (OP). The dossier is essential for maintaining a verifiable chain of accountability. The evidence graph, starting from the real-time call, would be as follows 1:
+* **Goal:** Maintain a tamper-evident Chain of Custody while allowing for the procedural evolution of evidence status.
+* **Key Concept: Lifecycle of Evidence and State Transitions.**
+    * **Phase 1 (Investigation):** The dossier serves as an immutable "bag" of collected artifacts (photos, DNA reports). The focus is on *completeness* and *provenance*.
+    * **Phase 2 (Adjudication):** As the case moves to trial, evidence undergoes state changes. An artifact may be `Marked`, `Offered`, `Admitted`, or `Stricken`.
+* **Mechanism:** This pattern employs **Annotation Edges** (see Section 10.2). To "strike" a piece of evidence, the Clerk of the Court issues a new dossier version containing an edge that targets the original evidence's SAID and applies a `status: "stricken"` attribute. This preserves the original artifact (essential for appeals) while explicitly excluding it from the current "effective" body of facts.
 
-1. A verifier receives a SIP INVITE containing a VVP passport signed by the OP's AID (from the kid header).
-1. The passport's evd claim points to the AP's dossier.
-1. The verifier fetches the dossier and validates its signature from the AP.
-1. Inside the dossier, the verifier finds the delsig edge pointing to a DelegatedSigner credential. This credential was issued by the AP to the OP, explicitly authorizing the OP to sign passports on the AP's behalf.
-1. The verifier also validates the other edges, such as the vetting credential for the AP and the TNAlloc credential, confirming the AP's identity and right to use the number.
+### Investigative Journalism: The Redacted Dossier
 
-This chained validation proves that the call, though technically originated by the OP, is being made with the explicit, verifiable, and revocable authority of the fully identified and accountable AP.
+This profile demonstrates the **Redacted Dossier** pattern, designed to reconcile the conflict between the need for public verification and the obligation to protect confidential sources.
 
-### Law Enforcement Evidence Management
+* **Goal:** Prove the existence and provenance of source material without revealing the source's identity.
+* **Key Concept: The Precursor Link.** This pattern utilizes the Cross-File Association (CFA) concept of "precursor" relationships.
+    * **The Private Graph:** The journalist holds a "Source Asset" (e.g., an unredacted recording of a whistleblower).
+    * **The Public Graph:** The journalist publishes a "Redacted Asset" (e.g., a transcript with names removed).
+* **Mechanism:** The public dossier links to the Redacted Asset. Internally, the Redacted Asset is cryptographically linked to the Source Asset via a "blinded" edge—typically a hash of the original file. This allows the journalist to prove, at a future date (e.g., declassification), that the redacted text was indeed derived from the specific original recording, without having exposed the source during the investigation.
 
-The dossier concept can be directly applied to the law enforcement use case of managing a digital case file, providing a robust, tamper-evident alternative to traditional systems.1
+### Mortgage Qualification: The Snapshot Dossier
 
-#### Dossier as a Tamper-Evident Case File
+The Mortgage Qualification profile illustrates the **Snapshot Dossier** pattern, which addresses the challenge of verifying dynamic, volatile data such as bank balances or credit scores.
 
-An investigating agency can create a dossier for each case. The dossier's SAID acts as a cryptographic seal on the entire collection of evidence at a specific point in time. As new evidence is collected, the agency can issue a new version of the dossier, including links to the new material. This creates a verifiable, append-only timeline of the case file's evolution, where each stage is sealed and tamper-evident.
+* **Goal:** Prove the state of a changing system at a specific point in time.
+* **Key Concept: Temporal Pinning.** A dossier cannot simply link to a bank's API, as the balance changes. It must link to a static artifact.
+* **Mechanism:** This pattern employs the **Oracle** or **Observer** role. The assembler (or a trusted third-party service) queries the dynamic data source at `Time T`. This observation is then wrapped in a signed ACDC (an "Observation Attestation") that effectively says, "I observed Account X having Balance Y at Block Height Z." The dossier links to this static attestation. This converts a stream of data into a verifiable snapshot, allowing a loan officer to verify "Funds Available" at the exact moment of the application.
 
-#### Linking Witness Statements and Forensic Reports
+### Clinical Trials: The Predicate Dossier
 
-Much of law enforcement evidence is not born-digital in a verifiable format (e.g., PDFs of lab reports, video files of interviews, scanned documents). The ACDC Wrapper pattern (Section 3.2.2) is the ideal mechanism for incorporating this evidence while preserving a verifiable chain of custody. When a piece of evidence is received, the evidence clerk or responsible officer would create and issue a wrapper ACDC. This wrapper would attest to the fact that "Officer Jane Doe received this specific file (identified by its hash) from this source at this date and time." This wrapper ACDC is then linked into the case dossier, creating a permanent, non-repudiable record of the evidence's entry into custody.
+This profile introduces the **Predicate Dossier** pattern, essential for environments with strict privacy regulations (e.g., HIPAA, GDPR) where raw data cannot be shared.
 
-### Investigative Journalism
-
-The dossier provides a powerful new tool for investigative journalists, particularly for managing source material and protecting anonymous sources.
-
-#### Dossier for Source Material Aggregation
-
-A journalist can create a dossier for each investigation. This dossier serves as a private, verifiable compilation of all source materials: interview notes, leaked documents, public records, data sets, etc. Each piece of material can be incorporated using the ACDC Wrapper pattern, creating a timestamped attestation of when the material was obtained. This provides a strong internal record for fact-checking and editorial oversight.
-
-#### Using Graduated Disclosure to Protect Anonymous Sources
-
-The graduated disclosure mechanism (Section 6.1) offers a revolutionary method for source protection. Consider a scenario where a journalist has a statement from an anonymous source, which is captured in an ACDC.
-
-1. The journalist includes a link to this full ACDC in their story's dossier.
-1. If the story's veracity is challenged, the journalist can present a compacted version of the dossier to an editor or a court.
-1. This compacted version would replace the sensitive source statement ACDC with its SAID.
-This act proves, cryptographically, that a source statement existed and was part of the evidence base when the dossier was created. It proves its existence and its role in the investigation without revealing the content of the statement or the identity of the source. This provides a far stronger basis for defending journalistic integrity than a simple verbal assertion, while maintaining the confidentiality required to protect sources from retribution.
+* **Goal:** Prove eligibility or compliance without disclosing the underlying sensitive data.
+* **Key Concept: Zero-Knowledge Predicates.**
+* **Mechanism:** Instead of linking to a raw evidence file (e.g., `blood_test_results.pdf`), the dossier links to a **Predicate Edge**. This edge points to a Zero-Knowledge Proof (ZKP) or a derived cryptographic claim generated from the raw data.
+    * *Example:* The dossier asserts `inclusion_criteria_met: true`. The evidence is a ZKP proving that "Subject Age > 18 AND HIV_Status == Positive" without revealing the subject's birthdate or specific medical markers.
+* **Verification:** The verifier validates the cryptographic proof rather than parsing the document, enabling high-assurance compliance without data leakage.
 
 [//]: # (\newpage)
 
@@ -417,3 +437,5 @@ This act proves, cryptographically, that a source statement existed and was part
 
 [4]. Verifiable Voice Protocol
 [4]: https://www.ietf.org/archive/id/draft-hardman-verifiable-voice-protocol-03.html
+
+```
